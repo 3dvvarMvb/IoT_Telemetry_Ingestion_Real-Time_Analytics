@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IoT FleetPulse - Industrial Telemetry & Streaming Engine</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    @keyframes pulse-dot {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.4); opacity: 0.6; }
+    }
+    .live-pulse { animation: pulse-dot 1.5s infinite ease-in-out; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans selection:bg-cyan-500 selection:text-white">
+
+  <!-- Header -->
+  <header class="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="p-2.5 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20">
+          <i class="fa-solid fa-satellite-dish text-xl"></i>
+        </div>
+        <div>
+          <span class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+            IoT FleetPulse
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+              <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 live-pulse"></span> STREAMING ACTIVO
+            </span>
+          </span>
+          <p class="text-[11px] text-slate-400">Go 1.23 Worker Pool &bull; TimescaleDB Hypertables &bull; Mosquitto MQTT</p>
+        </div>
+      </div>
+
+      <!-- System Badges & External Links -->
+      <div class="flex items-center gap-3">
+        <div class="hidden lg:flex items-center gap-2 text-xs">
+          <span class="px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-mono text-[11px]">
+            <i class="fa-solid fa-database text-cyan-400 mr-1"></i> TimescaleDB :5435
+          </span>
+          <span class="px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-mono text-[11px]">
+            <i class="fa-solid fa-tower-broadcast text-emerald-400 mr-1"></i> MQTT :1883
+          </span>
+        </div>
+        <a href="http://localhost:3001" target="_blank" class="px-3 py-1.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-300 border border-orange-500/30 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition">
+          <i class="fa-solid fa-chart-pie text-orange-400"></i> Abrir Grafana :3001
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+
+    <!-- KPI Metric Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      
+      <div class="p-4 rounded-2xl bg-slate-900 border border-slate-800">
+        <div class="flex items-center justify-between text-xs text-slate-400 mb-1">
+          <span>Puntos Ingestados (Total)</span>
+          <i class="fa-solid fa-layer-group text-cyan-400"></i>
+        </div>
+        <div class="text-2xl font-black text-white font-mono" id="kpiTotalPoints">0</div>
+        <div class="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
+          <i class="fa-solid fa-check text-emerald-400"></i> Persistidos en TimescaleDB
+        </div>
+      </div>
+
+      <div class="p-4 rounded-2xl bg-slate-900 border border-slate-800">
+        <div class="flex items-center justify-between text-xs text-slate-400 mb-1">
+          <span>Tasa de Ingesta (EPS)</span>
+          <i class="fa-solid fa-bolt text-amber-400"></i>
+        </div>
+        <div class="text-2xl font-black text-amber-300 font-mono" id="kpiEPS">0.0 <span class="text-xs font-normal text-slate-400">evt/s</span></div>
+        <div class="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
+          <i class="fa-solid fa-network-wired text-cyan-400"></i> Worker pool multihilo (Go)
+        </div>
+      </div>
+
+      <div class="p-4 rounded-2xl bg-slate-900 border border-slate-800">
+        <div class="flex items-center justify-between text-xs text-slate-400 mb-1">
+          <span>Dispositivos Activos</span>
+          <i class="fa-solid fa-microchip text-emerald-400"></i>
+        </div>
+        <div class="text-2xl font-black text-white font-mono" id="kpiActiveDevices">0</div>
+        <div class="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
+          <i class="fa-solid fa-truck-moving text-emerald-400"></i> Sensores industriales monitoreados
+        </div>
+      </div>
+
+      <div class="p-4 rounded-2xl bg-slate-900 border border-slate-800">
+        <div class="flex items-center justify-between text-xs text-slate-400 mb-1">
+          <span>Alertas Activas</span>
+          <i class="fa-solid fa-triangle-exclamation text-rose-400"></i>
+        </div>
+        <div class="text-2xl font-black text-rose-400 font-mono" id="kpiAlerts">0</div>
+        <div class="text-[10px] text-slate-500 mt-1" id="kpiAlertsDetail">
+          Umbrales de seguridad en rango
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Simulator Control Panel -->
+    <div class="p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-cyan-950/30 to-slate-900 border border-cyan-500/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div>
+        <h2 class="text-sm font-bold text-white flex items-center gap-2">
+          <i class="fa-solid fa-gamepad text-cyan-400"></i> Centro de Control de Telemetría IoT & Simulador
+        </h2>
+        <p class="text-xs text-slate-400 mt-1">
+          Genera eventos de sensores (temperatura, vibración, presión, batería y ubicación) hacia los worker pools de Go y la hypertable de TimescaleDB.
+        </p>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <button onclick="simulatePoints(50, false)" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 flex items-center gap-1.5 transition">
+          <i class="fa-solid fa-plus text-cyan-400"></i> Simular Lote (50 Puntos)
+        </button>
+        <button onclick="simulatePoints(20, true)" class="px-3.5 py-2 bg-rose-950/60 hover:bg-rose-900/60 text-rose-200 rounded-xl text-xs font-semibold border border-rose-500/30 flex items-center gap-1.5 transition">
+          <i class="fa-solid fa-fire text-rose-400"></i> Inyectar Anomalía Crítica
+        </button>
+        <button id="btnAutoStream" onclick="toggleAutoStream()" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/20 flex items-center gap-1.5 transition">
+          <i class="fa-solid fa-play"></i> Iniciar Stream Continuo
+        </button>
+      </div>
+    </div>
+
+    <!-- Live Chart & Fleet Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- Time Series Chart (2 Cols) -->
+      <div class="lg:col-span-2 p-5 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h3 class="text-xs font-bold text-white flex items-center gap-2">
+              <i class="fa-solid fa-chart-line text-cyan-400"></i> Monitoreo Temporal en Tiempo Real (TimescaleDB)
+            </h3>
+            <p class="text-[11px] text-slate-400">Serie de tiempo de Temperatura (°C) y Vibración (mm/s) en flota industrial</p>
+          </div>
+          <span class="text-[10px] font-mono text-cyan-400 bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-500/20">
+            Actualización: 2s
+          </span>
+        </div>
+        <div class="relative h-64 w-full">
+          <canvas id="telemetryChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Fleet Device Status Summary (1 Col) -->
+      <div class="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col h-[340px]">
+        <div class="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
+          <h3 class="text-xs font-bold text-white flex items-center gap-2">
+            <i class="fa-solid fa-microchip text-emerald-400"></i> Estado de la Flota
+          </h3>
+          <button onclick="loadDevices()" class="text-xs text-slate-400 hover:text-white"><i class="fa-solid fa-arrows-rotate"></i></button>
+        </div>
+        <div id="devicesContainer" class="space-y-2.5 overflow-y-auto flex-1 pr-1">
+          <p class="text-xs text-slate-500 text-center py-8">Cargando dispositivos...</p>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Live Telemetry Log Table -->
+    <div class="p-5 rounded-2xl bg-slate-900 border border-slate-800">
+      <div class="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
+        <div>
+          <h3 class="text-xs font-bold text-white flex items-center gap-2">
+            <i class="fa-solid fa-stream text-cyan-400"></i> Registro de Telemetría Reciente (Hypertable Log)
+          </h3>
+          <p class="text-[11px] text-slate-400">Últimos eventos recibidos por los workers de Go y persistidos con timestamp particionado</p>
+        </div>
+        <button onclick="loadTelemetry()" class="text-xs text-slate-400 hover:text-white flex items-center gap-1.5">
+          <i class="fa-solid fa-arrows-rotate"></i> Refrescar
+        </button>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs">
+          <thead>
+            <tr class="text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800">
+              <th class="py-2.5 px-3">Dispositivo</th>
+              <th class="py-2.5 px-3">Sensor</th>
+              <th class="py-2.5 px-3">Valor</th>
+              <th class="py-2.5 px-3">Batería</th>
+              <th class="py-2.5 px-3">Estado</th>
+              <th class="py-2.5 px-3">Ubicación</th>
+              <th class="py-2.5 px-3">Timestamp</th>
+            </tr>
+          </thead>
+          <tbody id="telemetryTableBody" class="divide-y divide-slate-800/60 font-mono text-[11px]">
+            <tr>
+              <td colspan="7" class="py-6 text-center text-slate-500">Cargando telemetría...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    let isAutoStreaming = false;
+    let autoStreamInterval = null;
+    let telemetryChart = null;
+
+    // Inicializar Chart.js
+    function initChart() {
+      const ctx = document.getElementById('telemetryChart').getContext('2d');
+      telemetryChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [
+            {
+              label: 'Temperatura (°C)',
+              borderColor: '#06b6d4',
+              backgroundColor: 'rgba(6, 182, 212, 0.1)',
+              borderWidth: 2,
+              tension: 0.3,
+              fill: true,
+              data: []
+            },
+            {
+              label: 'Vibración (mm/s)',
+              borderColor: '#f59e0b',
+              backgroundColor: 'rgba(245, 158, 11, 0.05)',
+              borderWidth: 2,
+              tension: 0.3,
+              fill: true,
+              data: []
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              labels: { color: '#94a3b8', font: { size: 11, family: 'monospace' } }
+            }
+          },
+          scales: {
+            x: {
+              ticks: { color: '#64748b', font: { size: 10, family: 'monospace' }, maxTicksLimit: 8 },
+              grid: { color: 'rgba(51, 65, 85, 0.3)' }
+            },
+            y: {
+              ticks: { color: '#64748b', font: { size: 10, family: 'monospace' } },
+              grid: { color: 'rgba(51, 65, 85, 0.3)' }
+            }
+          }
+        }
+      });
+    }
+
+    async function loadStats() {
+      try {
+        const res = await fetch('/api/v1/stats');
+        const data = await res.json();
+        document.getElementById('kpiTotalPoints').textContent = data.total_ingested_points.toLocaleString();
+        document.getElementById('kpiEPS').innerHTML = data.current_eps.toFixed(1) + ' <span class="text-xs font-normal text-slate-400">evt/s</span>';
+        document.getElementById('kpiActiveDevices').textContent = data.active_devices_count;
+        document.getElementById('kpiAlerts').textContent = data.active_alerts_count;
+        
+        const alertDetail = document.getElementById('kpiAlertsDetail');
+        if (data.active_alerts_count > 0) {
+          alertDetail.innerHTML = '<span class="text-rose-400 font-semibold flex items-center gap-1"><i class="fa-solid fa-triangle-exclamation"></i> Dispositivos requieren atención</span>';
+        } else {
+          alertDetail.textContent = 'Flota operando en rangos nominales';
+        }
+      } catch (err) {
+        console.error("Error cargando stats:", err);
+      }
+    }
+
+    async function loadDevices() {
+      try {
+        const res = await fetch('/api/v1/devices');
+        const devices = await res.json();
+        const container = document.getElementById('devicesContainer');
+        container.innerHTML = '';
+
+        if (!devices || devices.length === 0) {
+          container.innerHTML = '<p class="text-xs text-slate-500 text-center py-8">Sin dispositivos registrados</p>';
+          return;
+        }
+
+        devices.forEach(d => {
+          const card = document.createElement('div');
+          card.className = "p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs";
+          
+          let statusBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">OK</span>';
+          if (d.last_status === 'CRITICAL') {
+            statusBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">CRITICAL</span>';
+          } else if (d.last_status === 'WARNING') {
+            statusBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">WARN</span>';
+          }
+
+          let batColor = 'bg-emerald-400';
+          if (d.last_battery < 25) batColor = 'bg-rose-400';
+          else if (d.last_battery < 60) batColor = 'bg-amber-400';
+
+          card.innerHTML = 
+            '<div>' +
+              '<div class="flex items-center gap-2">' +
+                '<span class="font-bold text-white font-mono">' + d.device_id + '</span>' +
+                statusBadge +
+              '</div>' +
+              '<div class="text-[10px] text-slate-400 mt-0.5">' + d.sensor_type + ': <strong class="text-slate-200">' + d.last_metric.toFixed(1) + '</strong> &bull; ' + d.location + '</div>' +
+            '</div>' +
+            '<div class="text-right">' +
+              '<div class="text-[10px] text-slate-400 flex items-center gap-1 justify-end">' +
+                '<div class="w-12 h-1.5 bg-slate-800 rounded-full overflow-hidden">' +
+                  '<div class="' + batColor + ' h-full" style="width: ' + d.last_battery + '%"></div>' +
+                '</div>' +
+                '<span class="font-mono">' + d.last_battery + '%</span>' +
+              '</div>' +
+              '<div class="text-[9px] text-slate-500 font-mono mt-0.5">' + (d.total_points || 1) + ' pts</div>' +
+            '</div>';
+          container.appendChild(card);
+        });
+      } catch (err) {
+        console.error("Error cargando devices:", err);
+      }
+    }
+
+    async function loadTelemetry() {
+      try {
+        const res = await fetch('/api/v1/telemetry');
+        const data = await res.json();
+        const tbody = document.getElementById('telemetryTableBody');
+        tbody.innerHTML = '';
+
+        if (!data || data.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" class="py-6 text-center text-slate-500">Sin datos de telemetría</td></tr>';
+          return;
+        }
+
+        const chartTimes = [];
+        const chartTemps = [];
+        const chartVibs = [];
+
+        // Invertir para chart cronológico
+        const reversed = [...data].reverse();
+        reversed.slice(-15).forEach(pt => {
+          const t = new Date(pt.time).toLocaleTimeString();
+          chartTimes.push(t);
+          if (pt.sensor_type === 'temperature') {
+            chartTemps.push(pt.metric_value);
+            chartVibs.push(null);
+          } else if (pt.sensor_type === 'vibration') {
+            chartTemps.push(null);
+            chartVibs.push(pt.metric_value);
+          } else {
+            chartTemps.push(null);
+            chartVibs.push(null);
+          }
+        });
+
+        if (telemetryChart) {
+          telemetryChart.data.labels = chartTimes;
+          telemetryChart.data.datasets[0].data = chartTemps;
+          telemetryChart.data.datasets[1].data = chartVibs;
+          telemetryChart.update('none');
+        }
+
+        data.slice(0, 15).forEach(pt => {
+          const row = document.createElement('tr');
+          row.className = "hover:bg-slate-900/60 transition";
+          
+          let statusBadge = '<span class="text-emerald-400">● OK</span>';
+          if (pt.status === 'CRITICAL') statusBadge = '<span class="text-rose-400 font-bold">▲ CRITICAL</span>';
+          else if (pt.status === 'WARNING') statusBadge = '<span class="text-amber-400">▲ WARN</span>';
+
+          const timeStr = new Date(pt.time).toLocaleTimeString();
+
+          row.innerHTML = 
+            '<td class="py-2.5 px-3 font-semibold text-slate-200">' + pt.device_id + '</td>' +
+            '<td class="py-2.5 px-3 text-cyan-300">' + pt.sensor_type + '</td>' +
+            '<td class="py-2.5 px-3 font-bold text-white">' + pt.metric_value.toFixed(2) + '</td>' +
+            '<td class="py-2.5 px-3 text-slate-400">' + pt.battery_level + '%</td>' +
+            '<td class="py-2.5 px-3">' + statusBadge + '</td>' +
+            '<td class="py-2.5 px-3 text-slate-400">' + (pt.location || 'Site A') + '</td>' +
+            '<td class="py-2.5 px-3 text-slate-500">' + timeStr + '</td>';
+          tbody.appendChild(row);
+        });
+
+      } catch (err) {
+        console.error("Error cargando telemetría:", err);
+      }
+    }
+
+    async function simulatePoints(count, anomalies) {
+      try {
+        const res = await fetch('/api/v1/simulate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ count: count, anomalies: anomalies })
+        });
+        const result = await res.json();
+        await loadAll();
+      } catch (err) {
+        alert("Error simulando telemetría: " + err.message);
+      }
+    }
+
+    function toggleAutoStream() {
+      const btn = document.getElementById('btnAutoStream');
+      isAutoStreaming = !isAutoStreaming;
+      if (isAutoStreaming) {
+        btn.innerHTML = '<i class="fa-solid fa-pause"></i> Detener Stream';
+        btn.className = 'px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-rose-600/20 flex items-center gap-1.5 transition';
+        autoStreamInterval = setInterval(() => {
+          simulatePoints(10, Math.random() < 0.15);
+        }, 1200);
+      } else {
+        clearInterval(autoStreamInterval);
+        btn.innerHTML = '<i class="fa-solid fa-play"></i> Iniciar Stream Continuo';
+        btn.className = 'px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/20 flex items-center gap-1.5 transition';
+      }
+    }
+
+    async function loadAll() {
+      await Promise.all([loadStats(), loadDevices(), loadTelemetry()]);
+    }
+
+    // Inicialización al cargar la página
+    window.addEventListener('DOMContentLoaded', () => {
+      initChart();
+      loadAll();
+      setInterval(loadAll, 3000);
+    });
+  </script>
+</body>
+</html>

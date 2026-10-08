@@ -1,0 +1,82 @@
+name: iot-telemetry
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: iot_mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    networks:
+      - iot-net
+
+  timescale:
+    image: timescale/timescaledb:latest-pg16
+    container_name: iot_timescale
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-iot_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-iot_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-telemetry_db}
+    ports:
+      - "5435:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-iot_admin} -d ${POSTGRES_DB:-telemetry_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - iot-net
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: iot_grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      timescale:
+        condition: service_healthy
+    networks:
+      - iot-net
+
+  telemetry-ingest:
+    build:
+      context: ./ingest-service
+      dockerfile: Dockerfile
+    container_name: iot_telemetry_ingest
+    restart: unless-stopped
+    environment:
+      PORT: "8082"
+      DB_HOST: timescale
+      DB_PORT: "5432"
+      DB_USER: ${POSTGRES_USER:-iot_admin}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-iot_pass}
+      DB_NAME: ${POSTGRES_DB:-telemetry_db}
+    ports:
+      - "8082:8082"
+    depends_on:
+      timescale:
+        condition: service_healthy
+    networks:
+      - iot-net
+
+volumes:
+  timescale_data:
+  grafana_data:
+
+networks:
+  iot-net:
+    driver: bridge
