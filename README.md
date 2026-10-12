@@ -1,4 +1,4 @@
-# Project 5: IoT Telemetry Ingestion & Real-Time Analytics
+# IoT Telemetry Ingestion & Real-Time Analytics
 
 Motor de ingestión de alto rendimiento para flotas y sensores industriales con persistencia en series temporales (TimescaleDB / PostgreSQL), broker MQTT y dashboards preconfigurados en Grafana.
 
